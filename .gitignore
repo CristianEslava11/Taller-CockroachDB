@@ -1,0 +1,25 @@
+# Entornos virtuales y cachés de Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Variables locales: aquí puede ir la licencia de CockroachDB (usar .env.example como plantilla)
+.env
+.env.*
+!.env.example
+
+# Configuración local de herramientas y editores
+.claude/
+.codex/
+.vscode/
+.idea/
+
+# Archivos del sistema operativo y de OneDrive
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Borradores locales que todavía no se publican
+docs/informe.md

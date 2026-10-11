@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Laboratorio de sharding horizontal y vertical con estudiantes ficticios de la UPTC y CockroachDB.">
+  <title>UPTC · Laboratorio de sharding</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Saltar al contenido</a>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="UPTC, inicio"><span class="brand-mark">U</span><span>UPTC<small>LABORATORIO DE DATOS</small></span></a>
+    <div class="sidebar-intro"><span class="eyebrow">ELECTIVA · BASES DE DATOS</span><p>Una universidad.<br>Datos distribuidos.</p></div>
+    <nav aria-label="Secciones del laboratorio">
+      <button class="nav-item active" data-view="distribucion" aria-current="page"><span>01</span> Distribución <b>↗</b></button>
+      <button class="nav-item" data-view="estudiantes"><span>02</span> Estudiantes <b>↗</b></button>
+      <button class="nav-item" data-view="registro"><span>03</span> Registrar <b>↗</b></button>
+      <button class="nav-item" data-view="fragmentos"><span>04</span> Fragmentos <b>↗</b></button>
+      <button class="nav-item" data-view="validacion"><span>05</span> Validación <b>↗</b></button>
+    </nav>
+    <div class="sidebar-bottom"><span class="engine-dot"></span> CockroachDB <span class="version-label">SQL distribuido</span><a href="/docs" target="_blank" rel="noopener">Explorar API /docs <span>↗</span></a><p>Ejercicio académico.<br>Todos los estudiantes son ficticios.</p></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div><span class="breadcrumb">UPTC</span><span class="breadcrumb-separator">/</span><span id="section-label">Distribución</span></div><div class="connection-status"><span id="api-indicator" class="status-dot unknown"></span><span id="api-status">Comprobando API</span><span class="local-badge">LOCAL</span></div></header>
+    <main id="main" tabindex="-1">
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section id="view-distribucion" class="view">
+        <div class="page-heading"><div><span class="eyebrow">SHARDING HORIZONTAL + VERTICAL</span><h1>Estudiantes,<br><em>distribuidos.</em></h1><p>Cuatro sedes. Cinco nodos. Un registro que se reconstruye.</p></div><div class="heading-actions"><span class="live-label"><span class="status-dot"></span> Estado cada 8 s</span><button class="button secondary" id="refresh-cluster">Actualizar <span>↻</span></button><span id="last-update" class="muted small">Sin consulta todavía</span></div></div>
+        <div class="metrics"><div class="metric"><span class="metric-label">SEDES ACADÉMICAS</span><strong>04</strong><span>Tunja · Duitama · Sogamoso · Aguazul</span></div><div class="metric"><span class="metric-label">NODOS DISPONIBLES</span><strong id="metric-nodes">—<small>/ 5</small></strong><span id="metric-node-caption">Esperando comprobación SQL</span></div><div class="metric"><span class="metric-label">ESTUDIANTES</span><strong id="metric-students">—</strong><span id="metric-student-caption">Conteo real de fragmentos académicos</span></div></div>
+        <div class="section-heading"><div><span class="eyebrow">01 / DISTRIBUCIÓN FÍSICA</span><h2>El mapa del clúster</h2></div><div class="legend"><span><i class="legend-dot academic"></i> Académico</span><span><i class="legend-dot contact"></i> Contacto</span></div></div>
+        <div id="node-grid" class="node-grid" aria-live="polite"></div>
+        <div class="architecture-strip"><span class="architecture-label">RECONSTRUCCIÓN</span><span class="fragment-pill academic">Académico <small>por sede</small></span><span class="join-symbol">+</span><span class="fragment-pill contact">Contacto <small>Central · Tunja</small></span><span class="join-symbol">→</span><span class="complete-pill">Estudiante completo</span><button class="text-button" data-go="fragmentos">Ver fragmentos ↗</button></div>
+        <div class="section-heading"><div><span class="eyebrow">02 / EVIDENCIA DEL MOTOR</span><h2>Dónde están los datos</h2></div><button class="button secondary" id="load-distribution">Consultar rangos ↗</button></div>
+        <p class="section-description">La regla de ubicación y las réplicas observadas se muestran por separado. El nodo de conexión puede ser distinto del que almacena el fragmento.</p>
+        <div id="distribution-content" class="panel empty-state"><span class="empty-symbol">↗</span><h3>Comprueba la distribución real</h3><p>Consulta los rangos de CockroachDB para verificar sus réplicas y localidades.</p></div>
+        <p class="footnote">Cada nodo es una instancia independiente en Docker. Los cinco contenedores comparten este computador.</p>
+      </section>
+      <section id="view-estudiantes" class="view" hidden>
+        <div class="page-heading compact"><div><span class="eyebrow">CONSULTA HORIZONTAL</span><h1>Estudiantes por sede.</h1><p>El filtro permite consultar el fragmento académico de una sede.</p></div><button class="button primary" data-go="registro">Registrar estudiante <span>+</span></button></div>
+        <div class="panel extra-filters"><label for="filter-program">Programa académico (opcional)<input id="filter-program" form="list-form" minlength="3" maxlength="120" placeholder="Nombre exacto del programa"></label><label class="checkbox-label" for="filter-explain"><input id="filter-explain" form="list-form" type="checkbox">Incluir EXPLAIN ANALYZE</label></div>
+        <div class="panel"><form id="list-form" class="filter-bar"><label for="filter-sede">Sede<select id="filter-sede"><option value="">Todas las sedes</option><option value="tunja">Tunja</option><option value="duitama">Duitama</option><option value="sogamoso">Sogamoso</option><option value="aguazul">Aguazul</option></select></label><button class="button primary" type="submit">Consultar <span>→</span></button><span id="list-count" class="muted small"></span></form><div class="table-scroll"><table><thead><tr><th>Estudiante</th><th>Sede</th><th>Programa</th><th>Semestre</th><th><span class="sr-only">Acciones</span></th></tr></thead><tbody id="student-rows"><tr><td colspan="5" class="table-empty">Selecciona una sede y consulta sus estudiantes.</td></tr></tbody></table></div><div class="pagination"><span id="page-label" class="muted small">Página 1</span><div><button id="previous-page" class="button secondary" disabled>← Anterior</button><button id="next-page" class="button secondary" disabled>Siguiente →</button></div></div></div><div id="list-evidence" class="query-evidence" hidden></div>
+      </section>
+      <section id="view-registro" class="view" hidden>
+        <div class="page-heading compact"><div><span class="eyebrow">TRANSACCIÓN DISTRIBUIDA</span><h1>Un registro.<br>Dos fragmentos.</h1><p>Los datos académicos y de contacto se guardan en una sola transacción.</p></div></div>
+        <form id="register-form" class="registration-layout">
+          <div class="panel form-panel"><div class="form-section-heading"><span class="fragment-number academic">V1</span><div><h2>Datos académicos</h2><p>Se almacenan en el nodo de la sede seleccionada.</p></div></div><label for="register-name">Nombre completo<input id="register-name" name="nombre" autocomplete="off" required minlength="3" maxlength="120" placeholder="Ej. Laura Camila Torres"></label><div class="form-row"><label for="register-sede">Sede<select id="register-sede" name="sede" required><option value="tunja">Tunja</option><option value="duitama">Duitama</option><option value="sogamoso">Sogamoso</option><option value="aguazul">Aguazul</option></select></label><label for="register-semester">Semestre<input id="register-semester" name="semestre" type="number" min="1" max="12" value="1" required></label></div><label for="register-program">Programa académico<input id="register-program" name="programa" required minlength="3" maxlength="120" placeholder="Ej. Ingeniería de Sistemas"></label></div>
+          <div class="panel form-panel"><div class="form-section-heading"><span class="fragment-number contact">V2</span><div><h2>Datos de contacto</h2><p>Se almacenan en el nodo Central de Tunja.</p></div></div><label for="register-email">Correo electrónico<input id="register-email" name="correo" type="email" required maxlength="254" placeholder="laura.torres@example.com"></label><label for="register-phone">Teléfono<input id="register-phone" name="telefono" type="tel" required minlength="10" maxlength="20" pattern="[+0-9 ()\-]+" placeholder="300 123 4567"></label><label for="register-address">Dirección<input id="register-address" name="direccion" required minlength="5" maxlength="200" placeholder="Calle 10 # 8-20"></label></div>
+          <div class="registration-footer"><p>Se genera un UUID y se conserva la clave <code>(sede, id)</code> en ambos fragmentos.</p><button id="register-submit" class="button primary" type="submit">Guardar estudiante <span>→</span></button></div>
+        </form><div id="register-result" class="panel" hidden></div>
+      </section>
+      <section id="view-fragmentos" class="view" hidden>
+        <div class="page-heading compact"><div><span class="eyebrow">RECONSTRUCCIÓN VERTICAL</span><h1>Las partes y el todo.</h1><p>Consulta los dos fragmentos y observa el registro reconstruido mediante SQL.</p></div></div>
+        <form id="detail-form" class="panel detail-search"><label for="detail-sede">Sede<select id="detail-sede"><option value="tunja">Tunja</option><option value="duitama">Duitama</option><option value="sogamoso">Sogamoso</option><option value="aguazul">Aguazul</option></select></label><label for="detail-id">Identificador del estudiante<input id="detail-id" required placeholder="UUID del estudiante" spellcheck="false" autocomplete="off"></label><button class="button primary" type="submit">Reconstruir <span>→</span></button></form>
+        <div id="detail-result" class="panel empty-state"><span class="empty-symbol">⋈</span><h3>Selecciona un estudiante</h3><p>Abre un registro desde el listado o introduce su sede e identificador.</p></div>
+      </section>
+      <section id="view-validacion" class="view" hidden>
+        <div class="page-heading compact"><div><span class="eyebrow">EVIDENCIA REPRODUCIBLE</span><h1>Comprueba cada regla.</h1><p>Integridad, reconstrucción y distribución física consultadas en el motor.</p></div><button id="run-validation" class="button primary">Ejecutar validaciones <span>→</span></button></div>
+        <div id="validation-summary" class="validation-intro panel"><span class="validation-symbol">✓</span><div><h2>Las evidencias se obtienen de la base de datos</h2><p>Ejecuta las comprobaciones con los nodos disponibles. Una consulta fallida se identifica como no comprobada.</p></div></div><div id="validation-results" class="validation-grid"></div>
+      </section>
+    </main>
+    <footer class="page-footer"><span>Universidad Pedagógica y Tecnológica de Colombia</span><span>Laboratorio de sharding · 2026</span></footer>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

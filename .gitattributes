@@ -1,0 +1,13 @@
+# Normaliza los finales de línea en el repositorio.
+* text=auto
+
+# Estos archivos se ejecutan o se leen dentro de contenedores Linux: siempre LF,
+# aunque el repositorio se clone en Windows.
+*.sh  text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf
+
+# Binarios
+*.jpg binary
+*.png binary

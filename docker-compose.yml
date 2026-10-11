@@ -1,0 +1,137 @@
+# Clúster CockroachDB de 5 nodos para el taller de sharding (UPTC).
+# Cada contenedor representa un servidor independiente con su propio almacenamiento.
+# Localidad de cada nodo: sede=<sede>,rol=<academico|central>
+#
+#   docker compose up -d --build      # nodos + inicialización + API/frontend (http://localhost:8000)
+#   docker compose logs -f init       # ver la inicialización
+#   docker compose down -v            # borrar todo (reinicia el periodo de gracia de licencia)
+
+x-cockroach-node: &cockroach-node
+  image: cockroachdb/cockroach:v26.2.7
+  restart: unless-stopped
+  mem_limit: 1g
+  networks: [uptc]
+
+services:
+  tunja-academico:
+    <<: *cockroach-node
+    container_name: tunja-academico
+    hostname: tunja-academico
+    command: >-
+      start --insecure
+      --join=tunja-academico:26257,duitama-academico:26257,sogamoso-academico:26257,aguazul-academico:26257,tunja-central:26257
+      --advertise-addr=tunja-academico:26257
+      --locality=sede=tunja,rol=academico
+      --cache=256MiB --max-sql-memory=256MiB
+    ports: ["26257:26257", "8080:8080"]
+    volumes: [tunja-academico-data:/cockroach/cockroach-data]
+
+  duitama-academico:
+    <<: *cockroach-node
+    container_name: duitama-academico
+    hostname: duitama-academico
+    command: >-
+      start --insecure
+      --join=tunja-academico:26257,duitama-academico:26257,sogamoso-academico:26257,aguazul-academico:26257,tunja-central:26257
+      --advertise-addr=duitama-academico:26257
+      --locality=sede=duitama,rol=academico
+      --cache=256MiB --max-sql-memory=256MiB
+    ports: ["26258:26257", "8081:8080"]
+    volumes: [duitama-academico-data:/cockroach/cockroach-data]
+
+  sogamoso-academico:
+    <<: *cockroach-node
+    container_name: sogamoso-academico
+    hostname: sogamoso-academico
+    command: >-
+      start --insecure
+      --join=tunja-academico:26257,duitama-academico:26257,sogamoso-academico:26257,aguazul-academico:26257,tunja-central:26257
+      --advertise-addr=sogamoso-academico:26257
+      --locality=sede=sogamoso,rol=academico
+      --cache=256MiB --max-sql-memory=256MiB
+    ports: ["26259:26257", "8082:8080"]
+    volumes: [sogamoso-academico-data:/cockroach/cockroach-data]
+
+  aguazul-academico:
+    <<: *cockroach-node
+    container_name: aguazul-academico
+    hostname: aguazul-academico
+    command: >-
+      start --insecure
+      --join=tunja-academico:26257,duitama-academico:26257,sogamoso-academico:26257,aguazul-academico:26257,tunja-central:26257
+      --advertise-addr=aguazul-academico:26257
+      --locality=sede=aguazul,rol=academico
+      --cache=256MiB --max-sql-memory=256MiB
+    ports: ["26260:26257", "8083:8080"]
+    volumes: [aguazul-academico-data:/cockroach/cockroach-data]
+
+  tunja-central:
+    <<: *cockroach-node
+    container_name: tunja-central
+    hostname: tunja-central
+    command: >-
+      start --insecure
+      --join=tunja-academico:26257,duitama-academico:26257,sogamoso-academico:26257,aguazul-academico:26257,tunja-central:26257
+      --advertise-addr=tunja-central:26257
+      --locality=sede=tunja,rol=central
+      --cache=256MiB --max-sql-memory=256MiB
+    ports: ["26261:26257", "8084:8080"]
+    volumes: [tunja-central-data:/cockroach/cockroach-data]
+
+  # Inicializa el clúster, aplica la licencia (si existe), crea el esquema,
+  # carga datos y espera a que la ubicación de los fragmentos converja.
+  init:
+    image: cockroachdb/cockroach:v26.2.7
+    container_name: uptc-init
+    entrypoint: ["/bin/bash", "/scripts/init.sh"]
+    environment:
+      COCKROACH_HOST: duitama-academico:26257
+      COCKROACH_LICENSE: ${COCKROACH_LICENSE:-}
+    volumes:
+      - ./db:/db:ro
+      - ./scripts:/scripts:ro
+    depends_on:
+      - tunja-academico
+      - duitama-academico
+      - sogamoso-academico
+      - aguazul-academico
+      - tunja-central
+    restart: "no"
+    networks: [uptc]
+
+  # API FastAPI + frontend (backend/ y frontend/, ver backend/README.md).
+  # Arranca cuando init terminó bien: el esquema existe y los fragmentos ya están en su nodo.
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      # tunja-central va al final: su caída no afecta al nodo de conexión.
+      DATABASE_URL: postgresql://root@duitama-academico:26257,sogamoso-academico:26257,aguazul-academico:26257,tunja-academico:26257,tunja-central:26257/uptc?sslmode=disable&connect_timeout=3&application_name=uptc-api
+      DB_HOSTS: tunja-academico,duitama-academico,sogamoso-academico,aguazul-academico,tunja-central
+      DB_PORTS: "26257"
+      NODOS_HTTP: tunja-academico=http://tunja-academico:8080,duitama-academico=http://duitama-academico:8080,sogamoso-academico=http://sogamoso-academico:8080,aguazul-academico=http://aguazul-academico:8080,tunja-central=http://tunja-central:8080
+      TIMEOUT_SQL: 5s
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks: [uptc]
+
+networks:
+  uptc:
+    name: uptc
+
+volumes:
+  tunja-academico-data:
+  duitama-academico-data:
+  sogamoso-academico-data:
+  aguazul-academico-data:
+  tunja-central-data:

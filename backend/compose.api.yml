@@ -1,0 +1,25 @@
+# Complemento de la infraestructura de Claude. Desde la raíz:
+# docker compose -f docker-compose.yml -f backend/compose.api.yml up -d --build api
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      DATABASE_URL: postgresql://root@duitama-academico:26257,sogamoso-academico:26257,aguazul-academico:26257,tunja-academico:26257,tunja-central:26257/uptc?sslmode=disable&connect_timeout=3&application_name=uptc-api
+      DB_HOSTS: tunja-academico,duitama-academico,sogamoso-academico,aguazul-academico,tunja-central
+      DB_PORTS: "26257"
+      NODOS_HTTP: tunja-academico=http://tunja-academico:8080,duitama-academico=http://duitama-academico:8080,sogamoso-academico=http://sogamoso-academico:8080,aguazul-academico=http://aguazul-academico:8080,tunja-central=http://tunja-central:8080
+      TIMEOUT_SQL: 5s
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks: [uptc]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3

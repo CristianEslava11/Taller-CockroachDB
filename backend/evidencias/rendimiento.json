@@ -1,0 +1,127 @@
+{
+  "fecha_utc": "2026-10-11T00:28:07.799969+00:00",
+  "muestras": [
+    {
+      "estado": "todos_activos",
+      "ruta": "/api/estudiantes?sede=tunja",
+      "segundos": 0.0157
+    },
+    {
+      "estado": "todos_activos",
+      "ruta": "/api/estudiantes?sede=duitama",
+      "segundos": 0.0149
+    },
+    {
+      "estado": "todos_activos",
+      "ruta": "/api/estudiantes",
+      "segundos": 0.0419
+    },
+    {
+      "estado": "todos_activos",
+      "ruta": "/api/distribucion",
+      "segundos": 0.0356
+    },
+    {
+      "estado": "todos_activos",
+      "ruta": "/api/nodos",
+      "segundos": 0.0244
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 0,
+      "ruta": "/api/estudiantes?sede=tunja",
+      "segundos": 0.1106
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 0,
+      "ruta": "/api/estudiantes?sede=duitama",
+      "segundos": 0.014
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 0,
+      "ruta": "/api/estudiantes",
+      "segundos": 0.0367
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 0,
+      "ruta": "/api/distribucion",
+      "segundos": 0.0217
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 0,
+      "ruta": "/api/nodos",
+      "segundos": 0.0188
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 1,
+      "ruta": "/api/estudiantes?sede=tunja",
+      "segundos": 0.1808
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 1,
+      "ruta": "/api/estudiantes?sede=duitama",
+      "segundos": 0.0166
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 1,
+      "ruta": "/api/estudiantes",
+      "segundos": 0.0567
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 1,
+      "ruta": "/api/distribucion",
+      "segundos": 0.0202
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 1,
+      "ruta": "/api/nodos",
+      "segundos": 0.2087
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 2,
+      "ruta": "/api/estudiantes?sede=tunja",
+      "segundos": 0.2073
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 2,
+      "ruta": "/api/estudiantes?sede=duitama",
+      "segundos": 0.0144
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 2,
+      "ruta": "/api/estudiantes",
+      "segundos": 0.033
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 2,
+      "ruta": "/api/distribucion",
+      "segundos": 0.0182
+    },
+    {
+      "estado": "central_apagado",
+      "ronda": 2,
+      "ruta": "/api/nodos",
+      "segundos": 0.0174
+    }
+  ],
+  "detalle_parcial_segundos": 5.3619,
+  "registro_fallido_segundos": 5.083,
+  "validacion_con_caida_segundos": 5.2662,
+  "atomicidad_y_errores": true,
+  "estudiantes_finales": 100,
+  "validaciones_finales": 32,
+  "maximo_consultas_sin_contacto_segundos": 0.2087
+}
