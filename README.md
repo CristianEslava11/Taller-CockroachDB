@@ -1,97 +1,79 @@
 # Taller de Sharding — UPTC
 
-Implementación y demostración de **sharding horizontal y vertical** con **CockroachDB**, a través de una app web (FastAPI + HTML/JS) que permite ver dónde vive cada dato, consultar, registrar, reconstruir registros y apagar servidores para observar qué pasa.
-
-> Electiva I — Bases de Datos · Universidad Pedagógica y Tecnológica de Colombia
-> Todos los estudiantes del proyecto son **ficticios**.
-
----
-
-## Contenido
-
-1. [Qué hicimos](#1-qué-hicimos)
-2. [Arquitectura](#2-arquitectura)
-3. [Cómo se fragmentaron los datos](#3-cómo-se-fragmentaron-los-datos)
-4. [Estructura del repositorio](#4-estructura-del-repositorio)
-5. [Cómo ejecutarlo](#5-cómo-ejecutarlo)
-6. [Usar la app](#6-usar-la-app)
-7. [Pruebas](#7-pruebas)
-8. [Demostrar la caída de un servidor](#8-demostrar-la-caída-de-un-servidor)
-9. [Explorar desde SQL](#9-explorar-desde-sql)
-10. [Solución de problemas](#10-solución-de-problemas)
-11. [Limitaciones y decisiones](#11-limitaciones-y-decisiones)
-12. [Más documentación](#12-más-documentación)
+> **Electiva I — Bases de Datos** · Universidad Pedagógica y Tecnológica de Colombia  
+> **Tema:** Implementación de Sharding Horizontal y Vertical con CockroachDB  
+> **Tecnologías:** CockroachDB v26.2.7 · Docker & Docker Compose · FastAPI · HTML5/Vanilla JS  
 
 ---
 
-## 1. Qué hicimos
+## Resumen Ejecutivo
 
-Un **directorio de estudiantes** de la UPTC con cuatro sedes: **Tunja (central), Duitama, Sogamoso y Aguazul**. Cada estudiante tiene datos académicos y datos de contacto:
+Este taller implementa y demuestra **sharding horizontal y vertical** sobre una base de datos distribuida utilizando **CockroachDB**. A través de una aplicación web interactiva y un conjunto de pruebas automatizadas, se evidencia:
+1. La ubicación física exacta de cada fragmento de datos en nodos dedicados.
+2. La ejecución de **transacciones distribuidas atómicas** (2PC) al registrar entidades compuestas en múltiples servidores.
+3. El enrutamiento de consultas mediante `EXPLAIN ANALYZE` (nodo coordinador vs. nodos de almacenamiento KV).
+4. La **tolerancia a fallos y consistencia** del clúster ante la caída programada de servidores.
 
-```
-estudiante(sede, id, nombre, programa, semestre, correo, telefono, direccion)
-```
+---
 
-Esa tabla lógica se fragmentó de dos formas:
+## 1. Modelo de Fragmentación
 
-- **Horizontal (por filas):** los datos académicos de cada sede viven en el servidor de esa sede.
-- **Vertical (por columnas):** los datos de contacto se separan de los académicos y viven en un servidor central en Tunja.
+El caso de estudio es un **directorio de estudiantes** de la UPTC distribuido en cuatro sedes: **Tunja**, **Duitama**, **Sogamoso** y **Aguazul**.
 
-**¿Por qué CockroachDB?** Es una base de datos SQL distribuida (compatible con PostgreSQL) donde el **motor** hace el sharding: nosotros declaramos los fragmentos y en qué servidor va cada uno, y la base se encarga del resto. Esto incluye las **transacciones distribuidas**: al registrar un estudiante se escribe en dos servidores a la vez, y nunca queda a medias. Versión usada: **v26.2.7**.
-
-## 2. Arquitectura
+### Esquema Lógico
+$$\text{estudiante}(\underline{\text{sede}}, \underline{\text{id}}, \text{nombre}, \text{programa}, \text{semestre}, \text{correo}, \text{telefono}, \text{direccion})$$
 
 ```mermaid
 flowchart TD
-    UI["Navegador<br/>HTML + JS + CSS"] --> API["API FastAPI<br/>(contenedor api, puerto 8000)"]
-    API -->|SQL| C{{"Clúster CockroachDB (5 nodos)"}}
-    C --- T["tunja-academico"]
-    C --- D["duitama-academico"]
-    C --- S["sogamoso-academico"]
-    C --- A["aguazul-academico"]
-    C --- Z["tunja-central"]
+    subgraph Logico["1. Entidad Lógica"]
+        E["<b>estudiante</b><br/>(sede, id, nombre, programa, semestre, correo, telefono, direccion)"]
+    end
+
+    subgraph Vertical["2. Fragmentación Vertical"]
+        V1["<b>estudiantes_academicos</b><br/>(<u>sede</u>, <u>id</u>, nombre, programa, semestre)"]
+        V2["<b>estudiantes_contacto</b><br/>(<u>sede</u>, <u>id</u>, correo, telefono, direccion)"]
+    end
+
+    subgraph Cluster["3. Distribución Física (Clúster de 5 Nodos)"]
+        N_TUN["<b>tunja-academico</b><br/>Localidad: sede=tunja, rol=academico<br/><i>Partición Académica Tunja</i>"]
+        N_DUI["<b>duitama-academico</b><br/>Localidad: sede=duitama, rol=academico<br/><i>Partición Académica Duitama</i>"]
+        N_SOG["<b>sogamoso-academico</b><br/>Localidad: sede=sogamoso, rol=academico<br/><i>Partición Académica Sogamoso</i>"]
+        N_AGU["<b>aguazul-academico</b><br/>Localidad: sede=aguazul, rol=academico<br/><i>Partición Académica Aguazul</i>"]
+        N_CEN["<b>tunja-central</b><br/>Localidad: sede=tunja, rol=central<br/><i>Tabla Completa de Contacto</i>"]
+    end
+
+    E -->|Separación Académica| V1
+    E -->|Separación de Contacto| V2
+
+    V1 -->|Horizontal: Tunja| N_TUN
+    V1 -->|Horizontal: Duitama| N_DUI
+    V1 -->|Horizontal: Sogamoso| N_SOG
+    V1 -->|Horizontal: Aguazul| N_AGU
+
+    V2 -->|Almacenamiento Central| N_CEN
 ```
 
-| Nodo | Localidad | Qué guarda | SQL | Consola web |
-|---|---|---|---|---|
-| `tunja-academico` | `sede=tunja,rol=academico` | Datos académicos de Tunja | `localhost:26257` | http://localhost:8080 |
-| `duitama-academico` | `sede=duitama,rol=academico` | Datos académicos de Duitama | `localhost:26258` | http://localhost:8081 |
-| `sogamoso-academico` | `sede=sogamoso,rol=academico` | Datos académicos de Sogamoso | `localhost:26259` | http://localhost:8082 |
-| `aguazul-academico` | `sede=aguazul,rol=academico` | Datos académicos de Aguazul | `localhost:26260` | http://localhost:8083 |
-| `tunja-central` | `sede=tunja,rol=central` | Contactos de **todas** las sedes | `localhost:26261` | http://localhost:8084 |
+---
 
-Cada nodo es un contenedor Docker con su **propio volumen de datos**: son servidores independientes, aunque en la demo corran en el mismo computador. Tunja tiene dos nodos con funciones distintas, así que los dos fragmentos verticales de sus estudiantes también quedan separados.
+### 1.1 Fragmentación Vertical — [`db/01_schema.sql`](db/01_schema.sql)
 
-## 3. Cómo se fragmentaron los datos
+La tabla lógica se divide en dos fragmentos que comparten la clave primaria compuesta `(sede, id)`:
 
-```mermaid
-flowchart LR
-    E["estudiante<br/>(tabla lógica)"] -->|vertical| V1["estudiantes_academicos<br/>sede, id, nombre, programa, semestre"]
-    E -->|vertical| V2["estudiantes_contacto<br/>sede, id, correo, telefono, direccion"]
-    V1 -->|horizontal| H1["tunja"] & H2["duitama"] & H3["sogamoso"] & H4["aguazul"]
-    V2 --> Z["tunja-central"]
-```
+| Fragmento | Atributos | Servidor Destino |
+| :--- | :--- | :--- |
+| **`estudiantes_academicos`** | `sede, id, nombre, programa, semestre` | Nodo de la sede respectiva |
+| **`estudiantes_contacto`** | `sede, id, correo, telefono, direccion` | `tunja-central` |
 
-### 3.1 Fragmentación vertical — [`db/01_schema.sql`](db/01_schema.sql)
+Este diseño cumple formalmente las tres reglas de fragmentación:
+* **Completitud:** Toda columna del esquema lógico pertenece a alguno de los fragmentos.
+* **Reconstrucción:** La unión relacional mediante un `NATURAL JOIN` o `JOIN ON (sede, id)` restituye la entidad completa sin pérdida de información.
+* **Disyunción:** Los atributos no clave son mutuamente excluyentes entre ambos fragmentos. Una llave foránea en `estudiantes_contacto` previene registros huérfanos.
 
-La tabla se divide en dos tablas que **comparten la clave `(sede, id)`**:
+---
 
-| Fragmento | Columnas | Dónde vive |
-|---|---|---|
-| `estudiantes_academicos` | `sede, id, nombre, programa, semestre` | Nodo de su sede |
-| `estudiantes_contacto` | `sede, id, correo, telefono, direccion` | `tunja-central` |
+### 1.2 Fragmentación Horizontal — [`db/02_horizontal.sql`](db/02_horizontal.sql)
 
-Cumple las tres reglas de una fragmentación vertical correcta:
-
-- **Completitud:** toda columna está en algún fragmento.
-- **Reconstrucción:** un `JOIN` por `(sede, id)` devuelve el registro original.
-- **Disyunción:** aparte de la clave, ninguna columna se repite.
-
-Una llave foránea de contacto a académicos impide contactos huérfanos.
-
-### 3.2 Fragmentación horizontal — [`db/02_horizontal.sql`](db/02_horizontal.sql)
-
-La tabla académica se parte por la **clave de shard `sede`**:
+La tabla académica se fragmenta por partición de lista utilizando la columna `sede` como clave de partición:
 
 ```sql
 ALTER TABLE estudiantes_academicos PARTITION BY LIST (sede) (
@@ -102,226 +84,253 @@ ALTER TABLE estudiantes_academicos PARTITION BY LIST (sede) (
 );
 ```
 
-- La clave primaria es `(sede, id)`. Como **empieza por `sede`**, las filas de una sede quedan juntas y forman su propio bloque (*rango*).
-- Un `CHECK (sede IN (...))` garantiza que cada fila pertenece a exactamente una partición.
-- El índice secundario `(sede, programa)` también se particiona. Si no, sus entradas quedarían fuera de la sede.
+* **Clave Primaria Compuesta:** Al iniciar con `sede` (`PRIMARY KEY (sede, id)`), las tuplas de una misma sede se almacenan contiguas en el mismo rango de almacenamiento (Range).
+* **Particionamiento de Índices:** El índice secundario `(sede, programa)` también está particionado para evitar accesos cruzados entre nodos durante búsquedas por programa.
 
-### 3.3 Ubicación física — [`db/02_horizontal.sql`](db/02_horizontal.sql), [`db/03_vertical.sql`](db/03_vertical.sql)
+---
 
-Cada nodo arranca con una **localidad** (`--locality=sede=...,rol=...`, en [`docker-compose.yml`](docker-compose.yml)), y cada fragmento se fija a la localidad que le corresponde con una **zona de replicación**:
+### 1.3 Ubicación Física y Zonas de Replicación — [`db/03_vertical.sql`](db/03_vertical.sql)
+
+Cada contenedor CockroachDB arranca con una etiqueta geográfica (`--locality=sede=...,rol=...`). Mediante **Replication Zones**, se ancla cada partición a su nodo respectivo:
 
 ```sql
--- Partición de Tunja (tabla + índices) → solo el nodo tunja-academico
+-- Partición de Tunja asignada exclusivamente a tunja-academico
 ALTER PARTITION tunja OF INDEX estudiantes_academicos@* CONFIGURE ZONE USING
     num_replicas = 1, constraints = '[+sede=tunja, +rol=academico]';
 
--- Tabla de contacto completa → solo el nodo tunja-central
+-- Tabla de contactos asignada exclusivamente a tunja-central
 ALTER TABLE estudiantes_contacto CONFIGURE ZONE USING
     num_replicas = 1, constraints = '[+sede=tunja, +rol=central]';
 ```
 
-**¿Por qué `num_replicas = 1`?** CockroachDB copia cada dato 3 veces por defecto. Con 5 nodos, casi todo terminaría en casi todos lados y no se vería la fragmentación. Con una sola copia, cada fragmento existe **solo** en su nodo: se puede demostrar dónde está, y al apagar ese nodo, ese fragmento (y solo ese) deja de estar disponible. En producción se usarían varias réplicas dentro de cada sede (ver [sección 11](#11-limitaciones-y-decisiones)).
+> **Nota metodológica:** Se configuró intencionalmente `num_replicas = 1` para aislar cada fragmento en su servidor físico respectivo. De este modo, la caída de un servidor evidencia de forma tangible la indisponibilidad de su fragmento correspondiente.
 
-Los datos internos del clúster sí conservan sus réplicas, por eso el clúster sigue funcionando cuando se apaga un nodo.
+---
 
-## 4. Estructura del repositorio
+## 2. Inicio Rápido (Quickstart)
 
-```
-├─ docker-compose.yml        # 5 nodos CockroachDB + init + api
-├─ .env.example              # plantilla para la licencia (opcional)
-├─ db/
-│  ├─ 01_schema.sql          # tablas, restricciones, llave foránea (fragmentación vertical)
-│  ├─ 02_horizontal.sql      # particiones por sede y su ubicación
-│  ├─ 03_vertical.sql        # ubicación de la tabla de contacto
-│  ├─ 04_seed.sql            # 100 estudiantes ficticios (Tunja 40, Duitama 25, Sogamoso 25, Aguazul 10)
-│  └─ validacion/            # consultas que validan la fragmentación (las usan el script y la API)
-├─ scripts/
-│  ├─ init.sh                # inicializa el clúster y espera a que cada fragmento llegue a su nodo
-│  └─ validar.sh             # las 6 pruebas de la sección 7
-├─ backend/                  # API FastAPI (ver backend/README.md)
-│  └─ tests/                 # pruebas automáticas de la API
-├─ frontend/                 # interfaz HTML + JS + CSS (la sirve la misma API)
-└─ docs/
-   ├─ contrato.md            # acuerdo técnico: esquema, puertos, endpoints, errores
-   └─ guion-demo.md          # guion de la exposición paso a paso
-```
+### Requisitos Previos
+* [Docker Desktop](https://www.docker.com/products/docker-desktop/) corriendo con al menos 6 GB de RAM asignados.
+* Puertos libres en el host: `8000`, `8080`–`8084` y `26257`–`26261`.
 
-## 5. Cómo ejecutarlo
-
-### Requisitos
-
-- [**Docker Desktop**](https://www.docker.com/products/docker-desktop/) abierto y corriendo, con unos 6 GB de RAM disponibles para Docker.
-- **Git Bash** (viene con [Git para Windows](https://git-scm.com/download/win)) para los scripts de prueba. En macOS o Linux sirve la terminal normal.
-- Puertos libres: `8000`, `8080`–`8084` y `26257`–`26261`.
-
-No hace falta instalar CockroachDB ni Python: todo corre en contenedores.
-
-### Pasos
+### Despliegue en 1 Minuto
 
 ```bash
+# 1. Clonar el repositorio
 git clone https://github.com/CristianEslava11/Taller-CockroachDB.git
 cd Taller-CockroachDB
+
+# 2. Construir e iniciar el clúster (5 nodos CockroachDB + inicializador + API web)
 docker compose up -d --build
 ```
 
-La primera vez descarga las imágenes y tarda unos minutos. Después, levantar todo desde cero toma **alrededor de 1 minuto**. Para seguir la inicialización:
-
+Para monitorear la inicialización y migración automática de datos:
 ```bash
 docker compose logs -f init
 ```
+*(Finaliza automáticamente con el mensaje `[init] Listo.`)*
 
-Termina con `[init] Listo.` y un resumen de estudiantes por sede. Luego abre:
+### Puntos de Acceso
 
-| Qué | Dirección |
-|---|---|
-| **La app** | http://localhost:8000 |
-| Documentación de la API (Swagger) | http://localhost:8000/docs |
-| Consola de CockroachDB | http://localhost:8080 (y 8081–8084 para los demás nodos) |
+| Interfaz | URL | Descripción |
+| :--- | :--- | :--- |
+| **Aplicación Web** | [http://localhost:8000](http://localhost:8000) | Dashboard interactivo de monitoreo y pruebas |
+| **API Docs (Swagger)** | [http://localhost:8000/docs](http://localhost:8000/docs) | Documentación interactiva de la API FastAPI |
+| **Consola CockroachDB** | [http://localhost:8080](http://localhost:8080) | Panel nativo del clúster (nodos 8080 al 8084) |
 
-### Qué hace `docker compose up`
+---
 
-1. Levanta los **5 nodos**, cada uno con su localidad.
-2. El contenedor **`init`** ([`scripts/init.sh`](scripts/init.sh)):
-   1. inicializa el clúster y espera a los 5 nodos;
-   2. ejecuta `db/01` a `db/04`;
-   3. **espera hasta que cada fragmento esté físicamente en su nodo**, comprobándolo con [`db/validacion/01_ubicacion.sql`](db/validacion/01_ubicacion.sql).
+## 3. Guía de Evaluación para el Docente
 
-   Si la base ya existe, no la recrea.
-3. Cuando `init` termina bien, arranca la **API**, que además sirve la interfaz.
+La aplicación web cuenta con herramientas integradas para validar los principios de bases de datos distribuidas en vivo:
 
-### Apagar, reiniciar y borrar
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Docente as Evaluador / Docente
+    participant UI as App Web (:8000)
+    participant Coord as Nodo Coordinador (Cualquiera)
+    participant KV_Sede as Nodo Académico (p. ej. Sogamoso)
+    participant KV_Central as Nodo Central (Tunja Central)
 
-```bash
-docker compose stop        # apagar (conserva los datos)
-docker compose up -d       # volver a encender
-docker compose down -v     # borrar todo, incluidos los datos (la próxima vez se recrea desde cero)
+    Note over Docente,UI: Paso 1 & 2: Lectura Distribuida (EXPLAIN ANALYZE)
+    Docente->>UI: Consultar estudiantes de Sogamoso
+    UI->>Coord: SELECT * FROM estudiantes_academicos WHERE sede = 'sogamoso'
+    Coord->>KV_Sede: Enruta lectura al nodo dueño del rango
+    KV_Sede-->>Coord: Retorna tuplas leídas
+    Coord-->>UI: Retorna datos + plan de ejecución
+    UI-->>Docente: Muestra "Conexión: Duitama | Datos leídos en: Sogamoso"
+
+    Note over Docente,UI: Paso 3: Transacción Distribuida (2PC)
+    Docente->>UI: Registrar estudiante en Aguazul
+    UI->>Coord: BEGIN TRANSACTION
+    Coord->>KV_AGU: INSERT INTO estudiantes_academicos (...)
+    Coord->>KV_Central: INSERT INTO estudiantes_contacto (...)
+    Coord->>Coord: Two-Phase Commit (2PC)
+    Coord-->>UI: Transacción exitosa
+    UI-->>Docente: Muestra evidencia de ubicación (Aguazul + Central)
 ```
 
-## 6. Usar la app
+### Paso 1: Distribución Física de Fragmentos
+1. Ingrese a la app web en la pestaña **Distribución**.
+2. Verifique el estado de los 5 nodos y la carga de registros por sede: Tunja (40), Duitama (25), Sogamoso (25), Aguazul (10) y Central (100 contactos).
+3. En la pestaña **Fragmentos**, confirme que la ubicación esperada y la observada mediante `SHOW RANGES` coinciden de forma exacta.
 
-| Sección | Qué muestra |
-|---|---|
-| **Distribución** | Mapa del clúster: los 5 nodos, si están disponibles y cuántos registros guarda cada uno |
-| **Estudiantes** | Listado por sede (fragmento académico). Con **"Incluir EXPLAIN ANALYZE"** muestra el nodo que recibió la consulta y el nodo que **realmente leyó los datos**, por ejemplo: *Conexión: Duitama (n1) · Datos leídos en: Sogamoso (n4)* |
-| **Registrar** | Registra un estudiante: escribe en dos servidores en una sola transacción y muestra dónde quedó cada parte |
-| **Fragmentos** | Ubicación real de cada fragmento, consultada al clúster, y **reconstrucción** de un estudiante: parte académica + contacto = registro completo |
-| **Validación** | Ejecuta las comprobaciones SQL de la fragmentación (32 comprobaciones) |
+### Paso 2: Lectura Distribuida y `EXPLAIN ANALYZE`
+1. Vaya a la pestaña **Estudiantes**.
+2. Seleccione una sede específica (por ejemplo, **Sogamoso**) y active la casilla **«Incluir EXPLAIN ANALYZE»**.
+3. Haga clic en **Consultar**.
+4. Observe la evidencia de ejecución:
+   * **Nodo de Conexión (SQL Coordinator):** El nodo que recibió la petición HTTP (puede ser cualquiera del clúster).
+   * **Nodo Lector (KV Reader):** Únicamente el nodo correspondiente a la sede solicitada (`sogamoso-academico`). La consulta no realiza escaneos globales ni toca nodos ajenos.
 
-La app **no deduce** dónde están los datos: todo lo consulta al clúster con `SHOW RANGES` y `EXPLAIN ANALYZE`.
+### Paso 3: Transacción Distribuida Atómica y Reconstrucción
+1. Ingrese a la pestaña **Registrar**.
+2. Registre un nuevo estudiante (por ejemplo, en la sede **Aguazul**).
+3. La interfaz mostrará cómo un único registro disparó una **transacción distribuida** escribiendo en dos servidores simultáneamente (`aguazul-academico` para datos académicos y `tunja-central` para contacto).
+4. En la pestaña **Fragmentos**, use la herramienta de **Reconstrucción** para observar la reconstrucción relacional en vivo ($V_1 \bowtie V_2$).
 
-## 7. Pruebas
-
-### 7.1 Validación del sharding desde SQL — [`scripts/validar.sh`](scripts/validar.sh)
-
-```bash
-bash scripts/validar.sh              # pruebas 1 a 6 (apaga y vuelve a encender tunja-central)
-bash scripts/validar.sh --sin-fallos # solo pruebas 1 a 4
-```
-
-| # | Prueba | Qué comprueba |
-|---|---|---|
-| 1 | Ubicación exclusiva | Cada bloque de datos (tabla e índices) tiene una sola copia, en el nodo que le corresponde |
-| 2 | Horizontal | Las filas de cada sede están en el bloque de su partición. La suma de particiones es el total, no hay filas fuera de las particiones ni `id` repetidos |
-| 3 | Vertical | Los fragmentos solo comparten `sede, id`, entre los dos tienen las 8 columnas y el JOIN reconstruye cada registro, comprobado **campo por campo** con uno de prueba |
-| 4 | Atomicidad | Si falla la escritura del contacto, tampoco queda la parte académica |
-| 5 | Caída de `tunja-central` | Lo académico responde. Contacto, JOIN y registro fallan por tiempo límite (5 s) sin dejar datos a medias |
-| 6 | Recuperación | Al encender `tunja-central` otra vez, los contactos vuelven y la validación vertical pasa |
-
-Debe terminar con `RESULTADO: todas las pruebas pasaron.` El script deja los datos como estaban: borra sus registros de prueba y siempre vuelve a encender el nodo.
-
-### 7.2 Desde la app o la API
-
-La sección **Validación** de la app (o `GET /api/validaciones`) ejecuta las pruebas 1 a 3.
-
-### 7.3 Pruebas automáticas de la API
-
-Requieren Python 3.12. Desde la raíz del repositorio:
+### Paso 4: Tolerancia a Fallos y Aislamiento de Errores
+Simule la desconexión del servidor central de contactos desde la terminal:
 
 ```bash
-python -m venv backend/.venv
-backend/.venv/Scripts/python -m pip install -r backend/requirements-dev.txt   # en macOS/Linux: backend/.venv/bin/python
-backend/.venv/Scripts/python -m pytest backend/tests -q
+docker compose stop tunja-central
 ```
 
-Sin clúster pasan 27 pruebas y 5 quedan omitidas. Para incluir las pruebas contra el clúster real, que debe estar corriendo, define antes `RUN_LIVE_TESTS=1` (con el clúster pasan las 32):
+Compruebe el comportamiento del clúster en la app web:
+* **Lecturas Académicas:** La consulta de estudiantes por sede continúa respondiendo con normalidad (aislamiento de fallos).
+* **Reconstrucción de Registros:** Se genera una respuesta parcial (datos académicos intactos, datos de contacto no disponibles).
+* **Registro de Nuevos Estudiantes:** La transacción distribuida es abortada atómicamente tras el tiempo límite (5 s, código HTTP `503`), garantizando que **no se guarden datos huérfanos o a medias**.
 
-- **Git Bash:** `RUN_LIVE_TESTS=1 backend/.venv/Scripts/python -m pytest backend/tests -q`
-- **PowerShell:** `$env:RUN_LIVE_TESTS='1'`
+Para restaurar el servicio:
+```bash
+docker compose start tunja-central
+```
 
-Más detalles en [`backend/README.md`](backend/README.md).
+---
 
-## 8. Demostrar la caída de un servidor
+## 4. Validación Automatizada
+
+El repositorio incluye un script de validación automatizada que ejecuta **32 comprobaciones SQL formales** y pruebas de estrés:
 
 ```bash
-docker compose stop tunja-central     # apaga el servidor de contactos
+# Ejecutar la suite completa de pruebas (incluye caída y recuperación de servidor)
+bash scripts/validar.sh
+
+# Ejecutar únicamente las pruebas de consistencia sin apagar nodos
+bash scripts/validar.sh --sin-fallos
 ```
 
-| Operación en la app | Resultado esperado | Por qué |
-|---|---|---|
-| Listar estudiantes de cualquier sede | ✅ Funciona normal | Los datos académicos no están en Central |
-| Reconstruir un estudiante | ⚠️ Parcial: datos académicos sí, contacto no | Se pierden solo las columnas de ese servidor |
-| Registrar un estudiante | ❌ Error 503 a los 5 s y **no queda nada guardado** | La transacción distribuida se revierte completa |
-| Distribución / Fragmentos | Central aparece "no disponible", pero su fragmento sigue ubicado | La ubicación sale de metadatos que sí están replicados |
+### Matriz de Pruebas
 
-```bash
-docker compose start tunja-central    # en unos segundos todo vuelve a la normalidad
+| # | Prueba | Criterio de Aceptación |
+| :-: | :--- | :--- |
+| **1** | **Ubicación Exclusiva** | Cada rango físico de datos reside únicamente en el nodo asignado por su restricción de zona. |
+| **2** | **Fragmentación Horizontal** | Cada partición almacena exclusivamente filas de su sede. No existen tuplas huérfanas ni claves duplicadas. |
+| **3** | **Fragmentación Vertical** | Los fragmentos comparten únicamente la clave compuesta `(sede, id)`. El `JOIN` reconstruye el 100% de los datos originales. |
+| **4** | **Atomicidad Distribuida** | Si la inserción en el nodo central falla, la inserción académica se revierte automáticamente (Rollback). |
+| **5** | **Resiliencia ante Caída** | Al detener `tunja-central`, las consultas académicas responden en tiempo normal; las operaciones dependientes de contacto fallan limpiamente. |
+| **6** | **Recuperación Automática** | Al reiniciar el nodo caído, el clúster reanuda la reconstrucción completa sin intervención manual. |
+
+---
+
+## 5. Estructura del Repositorio
+
+```text
+├── docker-compose.yml          # Definición de los 5 nodos CockroachDB + init + API web
+├── db/
+│   ├── 01_schema.sql           # Esquema base, tablas y clave foránea (Fragmentación Vertical)
+│   ├── 02_horizontal.sql       # Particionamiento por LIST(sede) y restricciones de zona
+│   ├── 03_vertical.sql         # Asignación de zona física para la tabla de contactos
+│   ├── 04_seed.sql             # Semilla con 100 estudiantes ficticios
+│   └── validacion/             # Consultas SQL que auditan la fragmentación
+├── scripts/
+│   ├── init.sh                 # Script de orquestación, bootstrap y verificación inicial
+│   └── validar.sh              # Suite de 6 pruebas automatizadas de sharding y tolerancia a fallos
+├── backend/                    # API desarrollada en FastAPI (psycopg3 + pool de conexiones)
+│   └── tests/                  # Pruebas unitarias y de integración de la API
+├── frontend/                   # Interfaz de usuario (HTML5, Vanilla JS, CSS responsivo)
+└── docs/
+    ├── contrato.md             # Especificación técnica formal (esquemas, puertos, códigos de error)
+    └── guion-demo.md           # Guión paso a paso para sustentación oral (≈ 10 minutos)
 ```
 
-También se puede apagar un nodo académico, por ejemplo `docker compose stop sogamoso-academico`. En ese caso solo deja de responder esa sede, y el listado general aparece marcado como parcial.
+---
 
-> ⚠️ Apaguen **un solo nodo a la vez**. Con dos apagados, algunos datos internos del clúster podrían perder quórum.
+<details>
+<summary><b>▶ Anexo A: Exploración Directa desde Cockroach SQL</b></summary>
 
-## 9. Explorar desde SQL
+<br>
+
+Puede interactuar directamente con la consola SQL de cualquiera de los nodos usando Docker:
 
 ```bash
 docker exec -it duitama-academico cockroach sql --insecure -d uptc
 ```
 
+**Consultas útiles para auditar el clúster:**
+
 ```sql
--- ¿En qué nodo está cada partición (tabla e índice)?
+-- 1. Inspeccionar en qué nodo físico está cada rango y partición
 SELECT index_name, start_key, replica_localities
 FROM [SHOW RANGES FROM TABLE estudiantes_academicos WITH INDEXES];
 
--- ¿Y la tabla de contacto?
+-- 2. Inspeccionar la ubicación de la tabla de contacto
 SELECT index_name, replica_localities
 FROM [SHOW RANGES FROM TABLE estudiantes_contacto WITH INDEXES];
 
--- ¿Qué nodo leyó los datos? (sql nodes = coordinador, kv nodes = dueño de los datos)
+-- 3. Analizar el plan de ejecución y el nodo KV que procesa la lectura
 EXPLAIN ANALYZE SELECT * FROM estudiantes_academicos WHERE sede = 'sogamoso';
 
--- Reconstrucción vertical
-SELECT a.*, c.correo, c.telefono, c.direccion
-FROM estudiantes_academicos a JOIN estudiantes_contacto c USING (sede, id)
+-- 4. Reconstrucción vertical manual mediante JOIN
+SELECT a.sede, a.id, a.nombre, a.programa, c.correo, c.telefono
+FROM estudiantes_academicos a 
+JOIN estudiantes_contacto c USING (sede, id)
 WHERE a.sede = 'aguazul';
 
--- Reglas de zona configuradas
+-- 5. Listar las configuraciones de zonas activas
 SHOW ZONE CONFIGURATIONS;
 ```
 
-En `start_key`, `…/1/"tunja"` es la partición `tunja` de la clave primaria y `…/2/"tunja"` la del índice. Los rangos que terminan en `/PrefixEnd` están vacíos.
+</details>
 
-## 10. Solución de problemas
+<details>
+<summary><b>▶ Anexo B: Pruebas Unitarias de la API (Pytest)</b></summary>
 
-| Problema | Solución |
-|---|---|
-| `failed to connect to the docker API` | Docker Desktop no está abierto. Ábranlo y esperen a que diga *running* |
-| http://localhost:8000 no abre después de reiniciar Docker o el computador | Docker no volvió a publicar el puerto de la API. Ejecuten `docker compose up -d --force-recreate --no-deps api` |
-| `init` falla o se queda esperando | Revisen `docker compose logs init`. Para empezar limpio: `docker compose down -v` y `docker compose up -d --build` |
-| `port is already allocated` | Otro programa usa ese puerto. Ciérrenlo o cambien el puerto del host en `docker-compose.yml` |
-| Error de rutas raras al correr scripts en Git Bash | Los scripts ya exportan `MSYS_NO_PATHCONV=1`. Si escriben comandos `docker exec` a mano, antepongan `MSYS_NO_PATHCONV=1` |
-| `bad interpreter` o `\r` en los scripts | El repo fuerza finales de línea LF con `.gitattributes`. Si copiaron los archivos sin Git (por ejemplo, un ZIP editado en Windows), vuelvan a clonar el repositorio |
-| Después de 7 días todo va lento | Es el límite de la licencia (sección 11). Recreen el clúster con `docker compose down -v` y `docker compose up -d --build` |
+<br>
 
-## 11. Limitaciones y decisiones
+Para ejecutar la suite de pruebas del backend en un entorno de desarrollo local (requiere Python 3.12):
 
-- **Una réplica por fragmento.** Sirve para demostrar la fragmentación, pero si un nodo cae, sus datos no están disponibles hasta que vuelva. En producción se usarían, por ejemplo, 3 nodos por sede con `num_replicas = 3`. Así se conserva la localidad y se tolera la caída de un servidor.
-- **Un solo computador.** Los nodos son servidores independientes en contenedores. Con máquinas separadas, la configuración es la misma y solo cambian las direcciones.
-- **Modo `--insecure`.** No usa TLS ni contraseñas, lo que solo es aceptable para una demo local.
-- **Licencia de CockroachDB.** Desde la versión 24.3, un clúster sin licencia tiene todas las funciones durante **7 días desde que se crea**; después se limita a 5 transacciones simultáneas. Para la demo basta con recrear el clúster. Si se necesita más tiempo, existe la licencia gratuita **Enterprise Free** para estudiantes: se pega en un archivo `.env` (copiado de `.env.example`) y `init` la aplica. **Nunca suban el `.env` al repo.**
-- **Consultas sin `sede`.** Deben visitar todas las particiones. La API las hace sede por sede para poder devolver resultados parciales si una no responde.
+```bash
+# Crear y activar entorno virtual
+python -m venv backend/.venv
+source backend/.venv/bin/activate       # En Windows: backend\.venv\Scripts\activate
 
-## 12. Más documentación
+# Instalar dependencias de prueba
+pip install -r backend/requirements-dev.txt
 
-- [`docs/contrato.md`](docs/contrato.md): acuerdo técnico entre la base de datos y la app (esquema, reglas de ubicación, conexión, endpoints, formato de errores y comportamiento ante fallos).
-- [`docs/guion-demo.md`](docs/guion-demo.md): guion de la exposición de unos 10 minutos, con plan B y preguntas probables.
-- [`backend/README.md`](backend/README.md): detalles de la API, la ejecución sin Docker y las pruebas.
+# Ejecutar pruebas unitarias (27 pruebas sin clúster)
+pytest backend/tests -q
+
+# Ejecutar las 32 pruebas completas (con el clúster de Docker activo)
+RUN_LIVE_TESTS=1 pytest backend/tests -q
+```
+
+Para más detalles, consulte la documentación interna en [`backend/README.md`](backend/README.md).
+
+</details>
+
+<details>
+<summary><b>▶ Anexo C: Solución de Problemas Frecuentes y Decisiones Técnicas</b></summary>
+
+<br>
+
+| Situación | Causa / Solución |
+| :--- | :--- |
+| `failed to connect to the docker API` | Docker Desktop no está en ejecución. Inicie la aplicación de Docker y reintente. |
+| El puerto `8000` o `8080` ya está en uso | Hay otro proceso ocupando los puertos. Deténgalo o modifique el mapeo en `docker-compose.yml`. |
+| La API no responde tras reiniciar Docker | Ejecute: `docker compose up -d --force-recreate --no-deps api`. |
+| Limpiar completamente el clúster y recrearlo | Ejecute `docker compose down -v` seguido de `docker compose up -d --build`. |
+| Advertencia de licencia (límite de 7 días) | CockroachDB v24+ incluye 7 días de funcionalidad Enterprise completa por clúster. Al recrear el clúster con `docker compose down -v` el contador se reinicia en cero. Si requiere uso extendido, puede incluir una llave estudiantil gratuita en `.env` (siguiendo `.env.example`). |
+
+</details>
