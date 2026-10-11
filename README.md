@@ -159,8 +159,8 @@ No hace falta instalar CockroachDB ni Python: todo corre en contenedores.
 ### Pasos
 
 ```bash
-git clone <URL-del-repositorio>
-cd Taller-Sharding
+git clone https://github.com/CristianEslava11/Taller-CockroachDB.git
+cd Taller-CockroachDB
 docker compose up -d --build
 ```
 
