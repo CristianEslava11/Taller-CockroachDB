@@ -252,7 +252,7 @@ bash scripts/validar.sh --sin-fallos
 ├── frontend/                   # Interfaz de usuario (HTML5, Vanilla JS, CSS responsivo)
 └── docs/
     ├── contrato.md             # Especificación técnica formal (esquemas, puertos, códigos de error)
-    └── guion-demo.md           # Guión paso a paso para sustentación oral (≈ 10 minutos)
+    
 ```
 
 ---
