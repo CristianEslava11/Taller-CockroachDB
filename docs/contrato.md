@@ -4,12 +4,6 @@ Acuerdo entre la capa de datos (`docker-compose.yml`, `db/`, `scripts/`) y la ap
 (`backend/`, `frontend/`). Todo lo que aparece aquí fue ejecutado y verificado contra el
 clúster real (CockroachDB v26.2.7). Si algo debe cambiar, se cambia primero en este documento.
 
-| Responsable | Archivos |
-|---|---|
-| Claude | `docs/contrato.md`, `docker-compose.yml`, `db/`, `scripts/` |
-| Codex | `backend/`, `frontend/` |
-| Integración (ambos) | servicio `api` en `docker-compose.yml` (hecho), informe, guion de demostración |
-
 ---
 
 ## 1. Contexto y decisiones
